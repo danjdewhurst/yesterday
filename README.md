@@ -5,11 +5,19 @@ List your git commits from yesterday (and today), de-duplicated by message.
 ## Installation
 
 ```bash
-# Copy to your PATH
-sudo cp yesterday /usr/local/bin/yesterday
+# One-liner install
+curl -fsSL https://raw.githubusercontent.com/dd-avrillo/yesterday/main/yesterday | sudo tee /usr/local/bin/yesterday > /dev/null && sudo chmod +x /usr/local/bin/yesterday
 
-# Or symlink
-sudo ln -s "$(pwd)/yesterday" /usr/local/bin/yesterday
+# Or with wget
+wget -qO- https://raw.githubusercontent.com/dd-avrillo/yesterday/main/yesterday | sudo tee /usr/local/bin/yesterday > /dev/null && sudo chmod +x /usr/local/bin/yesterday
+```
+
+### From source
+
+```bash
+git clone https://github.com/dd-avrillo/yesterday.git
+cd yesterday
+sudo cp yesterday /usr/local/bin/yesterday
 ```
 
 ## Usage
