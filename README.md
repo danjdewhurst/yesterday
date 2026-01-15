@@ -8,16 +8,16 @@ Perfect for daily standups - quickly see what you worked on yesterday without tr
 
 ```bash
 # One-liner install
-curl -fsSL https://raw.githubusercontent.com/dd-avrillo/yesterday/main/yesterday | sudo tee /usr/local/bin/yesterday > /dev/null && sudo chmod +x /usr/local/bin/yesterday
+curl -fsSL https://raw.githubusercontent.com/danjdewhurst/yesterday/main/yesterday | sudo tee /usr/local/bin/yesterday > /dev/null && sudo chmod +x /usr/local/bin/yesterday
 
 # Or with wget
-wget -qO- https://raw.githubusercontent.com/dd-avrillo/yesterday/main/yesterday | sudo tee /usr/local/bin/yesterday > /dev/null && sudo chmod +x /usr/local/bin/yesterday
+wget -qO- https://raw.githubusercontent.com/danjdewhurst/yesterday/main/yesterday | sudo tee /usr/local/bin/yesterday > /dev/null && sudo chmod +x /usr/local/bin/yesterday
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/dd-avrillo/yesterday.git
+git clone https://github.com/danjdewhurst/yesterday.git
 cd yesterday
 sudo cp yesterday /usr/local/bin/yesterday
 ```
