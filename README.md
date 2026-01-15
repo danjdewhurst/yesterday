@@ -2,6 +2,8 @@
 
 List your git commits from yesterday (and today), de-duplicated by message.
 
+Perfect for daily standups - quickly see what you worked on yesterday without trawling through git logs or trying to remember.
+
 ## Installation
 
 ```bash
