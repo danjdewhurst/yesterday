@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+# Check if we're in a git repository
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+    echo "Error: Not a git repository" >&2
+    exit 1
+fi
+
+# Get the current git user's name for default filtering
+GIT_USER=$(git config user.name 2>/dev/null || echo "")
+
+# Check for flags
+SHOW_ALL=false
+SHOW_ALL_TIME=false
+PASS_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --all-authors|-a)
+            SHOW_ALL=true
+            ;;
+        --all-time|-t)
+            SHOW_ALL_TIME=true
+            ;;
+        *)
+            PASS_ARGS+=("$arg")
+            ;;
+    esac
+done
+
+# Build git log command (use commit date %cd to match --since filtering)
+GIT_CMD=(git log --all --format="%h|%cd|%an|%s" --date=format:"%Y-%m-%d %H:%M")
+
+# Add author filter (default to current user unless --all-authors/-a or custom --author)
+if [[ "$SHOW_ALL" == false ]] && [[ -n "$GIT_USER" ]] && [[ ! " $* " =~ "--author" ]]; then
+    GIT_CMD+=("--author=$GIT_USER")
+fi
+
+# Add time filter (default to since start of yesterday unless --all-time/-t or custom --since/--after)
+if [[ "$SHOW_ALL_TIME" == false ]] && [[ ! " $* " =~ "--since" ]] && [[ ! " $* " =~ "--after" ]]; then
+    GIT_CMD+=("--since=yesterday")
+fi
+
+# Add any additional arguments
+if [[ ${#PASS_ARGS[@]} -gt 0 ]]; then
+    GIT_CMD+=("${PASS_ARGS[@]}")
+fi
+
+# Format: short hash | datetime | author | subject
+# De-duplicate based on the subject (commit message)
+"${GIT_CMD[@]}" | \
+    awk -F'|' '!seen[$4]++ {printf "%s  %s  %-20s  %s\n", $1, $2, $3, $4}'
