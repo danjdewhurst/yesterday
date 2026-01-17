@@ -36,7 +36,7 @@ sudo cp yesterday /usr/local/bin/yesterday
 yesterday                       # Your commits from yesterday + today
 yesterday -a                    # All authors
 yesterday -t                    # All time
-yesterday -a -t                 # All authors, all time
+yesterday -at                   # All authors, all time (combined flags)
 yesterday --since="1 week ago"  # Custom time range
 yesterday --author="john"       # Custom author filter
 ```
@@ -45,6 +45,9 @@ yesterday --author="john"       # Custom author filter
 |------|-------------|
 | `-a`, `--all-authors` | Show commits from all authors |
 | `-t`, `--all-time` | Remove the date filter |
+| `-h`, `--help` | Show help message |
+
+Flags are case-insensitive and can be combined (e.g., `-at`, `-TA`).
 
 Any additional arguments are passed directly to `git log`.
 
