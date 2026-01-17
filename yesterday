@@ -10,6 +10,7 @@ Usage: yesterday [options] [-- git-log-options]
 Options:
   -a, --all-authors    Show commits from all authors (default: current user)
   -t, --all-time       Show all commits (default: since yesterday)
+  -l, --literal        Use literal yesterday (default: last Friday on Mondays)
   -h, --help           Show this help message
 
 Examples:
@@ -36,6 +37,7 @@ GIT_USER=$(git config user.name 2>/dev/null || echo "")
 # Check for flags
 SHOW_ALL=false
 SHOW_ALL_TIME=false
+LITERAL_YESTERDAY=false
 PASS_ARGS=()
 for arg in "$@"; do
     case "$arg" in
@@ -48,10 +50,14 @@ for arg in "$@"; do
         --all-time|-t|-T)
             SHOW_ALL_TIME=true
             ;;
-        -[aAtT][aAtT])
-            # Combined short flags like -at, -ta, -AT, etc.
-            SHOW_ALL=true
-            SHOW_ALL_TIME=true
+        --literal|-l|-L)
+            LITERAL_YESTERDAY=true
+            ;;
+        -[aAtTlL][aAtTlL]|-[aAtTlL][aAtTlL][aAtTlL])
+            # Combined short flags like -at, -al, -atl, etc.
+            [[ "$arg" =~ [aA] ]] && SHOW_ALL=true
+            [[ "$arg" =~ [tT] ]] && SHOW_ALL_TIME=true
+            [[ "$arg" =~ [lL] ]] && LITERAL_YESTERDAY=true
             ;;
         *)
             PASS_ARGS+=("$arg")
@@ -68,8 +74,13 @@ if [[ "$SHOW_ALL" == false ]] && [[ -n "$GIT_USER" ]] && [[ ! " $* " =~ "--autho
 fi
 
 # Add time filter (default to since start of yesterday unless --all-time/-t or custom --since/--after)
+# On Mondays, default to "last friday" instead of "yesterday" (unless --literal/-l)
 if [[ "$SHOW_ALL_TIME" == false ]] && [[ ! " $* " =~ "--since" ]] && [[ ! " $* " =~ "--after" ]]; then
-    GIT_CMD+=("--since=yesterday")
+    if [[ "$LITERAL_YESTERDAY" == true ]] || [[ $(date +%u) -ne 1 ]]; then
+        GIT_CMD+=("--since=yesterday")
+    else
+        GIT_CMD+=("--since=last friday")
+    fi
 fi
 
 # Add any additional arguments

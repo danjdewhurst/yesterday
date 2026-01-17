@@ -36,6 +36,7 @@ sudo cp yesterday /usr/local/bin/yesterday
 yesterday                       # Your commits from yesterday + today
 yesterday -a                    # All authors
 yesterday -t                    # All time
+yesterday -l                    # Literal yesterday (disable Monday → Friday)
 yesterday -at                   # All authors, all time (combined flags)
 yesterday --since="1 week ago"  # Custom time range
 yesterday --author="john"       # Custom author filter
@@ -45,15 +46,17 @@ yesterday --author="john"       # Custom author filter
 |------|-------------|
 | `-a`, `--all-authors` | Show commits from all authors |
 | `-t`, `--all-time` | Remove the date filter |
+| `-l`, `--literal` | Use literal yesterday (disable workday logic) |
 | `-h`, `--help` | Show help message |
 
-Flags are case-insensitive and can be combined (e.g., `-at`, `-TA`).
+Flags are case-insensitive and can be combined (e.g., `-at`, `-al`, `-atl`).
 
 Any additional arguments are passed directly to `git log`.
 
 ## Features
 
 - **Smart defaults** — Filters to your commits using `git config user.name`
+- **Workday-aware** — On Mondays, shows Friday's commits instead of Sunday's
 - **De-duplication** — Same commit on multiple branches? Shows once.
 - **All branches** — Searches across your entire repo
 - **Consistent dates** — Uses commit date, not author date
