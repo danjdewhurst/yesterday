@@ -1,21 +1,29 @@
 # yesterday
 
-List your git commits from yesterday (and today), de-duplicated by message.
+> What did I work on yesterday?
 
-Perfect for daily standups - quickly see what you worked on yesterday without trawling through git logs or trying to remember.
+A tiny CLI for daily standups. Lists your git commits from yesterday and today, de-duplicated by message.
+
+```
+$ yesterday
+f0388245  2025-01-14 16:45  Daniel Dewhurst  docs: update API reference
+dab654e5  2025-01-14 15:26  Daniel Dewhurst  fix: resolve auth timeout
+51483f0e  2025-01-13 14:49  Daniel Dewhurst  feat: add user preferences
+```
 
 ## Installation
 
+**curl**
 ```bash
-# One-liner install
 curl -fsSL https://raw.githubusercontent.com/danjdewhurst/yesterday/main/yesterday | sudo tee /usr/local/bin/yesterday > /dev/null && sudo chmod +x /usr/local/bin/yesterday
+```
 
-# Or with wget
+**wget**
+```bash
 wget -qO- https://raw.githubusercontent.com/danjdewhurst/yesterday/main/yesterday | sudo tee /usr/local/bin/yesterday > /dev/null && sudo chmod +x /usr/local/bin/yesterday
 ```
 
-### From source
-
+**From source**
 ```bash
 git clone https://github.com/danjdewhurst/yesterday.git
 cd yesterday
@@ -25,40 +33,35 @@ sudo cp yesterday /usr/local/bin/yesterday
 ## Usage
 
 ```bash
-# Your commits from yesterday + today (default)
-yesterday
-
-# All authors
-yesterday -a
-yesterday --all-authors
-
-# All time (no date filter)
-yesterday -t
-yesterday --all-time
-
-# Combine flags
-yesterday -a -t
-
-# Custom filters (passed to git log)
-yesterday --since="1 week ago"
-yesterday --author="john"
+yesterday                       # Your commits from yesterday + today
+yesterday -a                    # All authors
+yesterday -t                    # All time
+yesterday -a -t                 # All authors, all time
+yesterday --since="1 week ago"  # Custom time range
+yesterday --author="john"       # Custom author filter
 ```
 
-## Output
+| Flag | Description |
+|------|-------------|
+| `-a`, `--all-authors` | Show commits from all authors |
+| `-t`, `--all-time` | Remove the date filter |
 
-```
-f0388245  2026-01-14 16:45  Daniel Dewhurst       docs: updates to AML tasks
-dab654e5  2026-01-14 15:26  Daniel Dewhurst       docs: tidy up AML tasks
-51483f0e  2026-01-14 14:49  Daniel Dewhurst       feat: add new feature
-```
+Any additional arguments are passed directly to `git log`.
 
 ## Features
 
-- Filters to your commits by default (uses `git config user.name`)
-- Shows commits from yesterday onwards by default
-- De-duplicates by commit message (useful when commits exist on multiple branches)
-- Searches all branches (`--all`)
-- Uses commit date (not author date) for consistent filtering
+- **Smart defaults** — Filters to your commits using `git config user.name`
+- **De-duplication** — Same commit on multiple branches? Shows once.
+- **All branches** — Searches across your entire repo
+- **Consistent dates** — Uses commit date, not author date
+
+## Platform Support
+
+| Platform | Status |
+|----------|--------|
+| Linux | Native |
+| macOS | Native |
+| Windows | Via Git Bash or WSL |
 
 ## License
 
