@@ -40,6 +40,9 @@ yesterday -l                    # Literal yesterday (disable Monday → Friday)
 yesterday -d ~/Projects         # Scan all repos in a directory
 yesterday -at                   # All authors, all time (combined flags)
 yesterday -atd ~/Projects       # Combined flags with directory scan
+yesterday --setup               # Configure AI provider
+yesterday --ai                  # Your commits with AI summary
+yesterday -ai                   # All authors with AI summary
 yesterday --since="1 week ago"  # Custom time range
 yesterday --author="john"       # Custom author filter
 ```
@@ -50,9 +53,11 @@ yesterday --author="john"       # Custom author filter
 | `-t`, `--all-time` | Remove the date filter |
 | `-l`, `--literal` | Use literal yesterday (disable workday logic) |
 | `-d`, `--directory DIR` | Scan all git repos in DIR |
+| `-i`, `--ai` | Summarize commits with AI (configure with `--setup`) |
+| `--setup` | Configure AI provider and API keys |
 | `-h`, `--help` | Show help message |
 
-Flags are case-insensitive and can be combined (e.g., `-at`, `-atd ~/Projects`).
+Flags are case-insensitive and can be combined (e.g., `-at`, `-ai`, `-atd ~/Projects`).
 
 Any additional arguments are passed directly to `git log`.
 
@@ -68,6 +73,37 @@ $ yesterday -d ~/Projects
 
 If the path is itself a git repo, it runs in single-repo mode on that repo.
 
+### AI Summarization
+
+Add `--ai` (or `-i`) to get a plain-English summary of your commits, powered by an LLM:
+
+```
+$ yesterday --ai
+f0388245  2025-01-14 16:45  Daniel Dewhurst  docs: update API reference
+dab654e5  2025-01-14 15:26  Daniel Dewhurst  fix: resolve auth timeout
+51483f0e  2025-01-13 14:49  Daniel Dewhurst  feat: add user preferences
+
+AI Summary (openai/gpt-4o-mini):
+- Updated the API documentation
+- Fixed a login timeout issue
+- Added a way for users to save their preferences
+```
+
+**Setup:** Run `yesterday --setup` to choose your provider and enter your API key. Configuration is stored in `~/.config/yesterday/config` (permissions `600`).
+
+**Supported providers:**
+
+| Provider | Model (default) | Requirements |
+|----------|----------------|--------------|
+| OpenAI | gpt-4o-mini | API key |
+| Claude (Anthropic) | claude-sonnet-4-20250514 | API key |
+| Gemini (Google) | gemini-2.0-flash | API key |
+| Ollama | llama3.2 | Local Ollama install |
+
+Requires `curl` and either `jq` or `python3` for JSON handling.
+
+**Combined flags** work naturally — `yesterday -ai` shows all authors' commits with an AI summary.
+
 ## Features
 
 - **Smart defaults** — Filters to your commits using `git config user.name`
@@ -76,6 +112,7 @@ If the path is itself a git repo, it runs in single-repo mode on that repo.
 - **All branches** — Searches across your entire repo
 - **Consistent dates** — Uses commit date, not author date
 - **Multi-repo scanning** — Scan all repos in a directory with `-d`
+- **AI summaries** — Get plain-English standup summaries with `--ai`
 
 ## Testing
 
