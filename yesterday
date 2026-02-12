@@ -11,6 +11,8 @@ Options:
   -t, --all-time         Show all commits (default: since yesterday)
   -l, --literal          Use literal yesterday (default: last Friday on Mondays)
   -d, --directory DIR    Scan all git repos in DIR
+  -i, --ai              Summarize commits with AI (configure with --setup)
+      --setup            Configure AI provider and API keys
   -h, --help             Show this help message
 
 Examples:
@@ -20,6 +22,9 @@ Examples:
   yesterday -at                    All commits from all authors
   yesterday -d ~/Projects          Scan all repos in a directory
   yesterday -atd ~/Projects        Combined flags with directory scan
+  yesterday --setup                Configure AI provider
+  yesterday --ai                   Your commits with AI summary
+  yesterday -ai                    All authors with AI summary
   yesterday --since="1 week ago"   Custom time range (passes to git log)
 
 Output: hash  datetime  author  message
@@ -27,11 +32,91 @@ EOF
     exit 0
 }
 
+run_setup() {
+    local config_dir="$HOME/.config/yesterday"
+    local config_file="$config_dir/config"
+    local provider api_key model ollama_host choice
+
+    echo "yesterday AI setup"
+    echo ""
+    echo "Choose your AI provider:"
+    echo "  1) OpenAI"
+    echo "  2) Claude (Anthropic)"
+    echo "  3) Gemini (Google)"
+    echo "  4) Ollama (local)"
+    echo ""
+    read -rp "Provider [1-4]: " choice
+
+    case "$choice" in
+        1)
+            provider="openai"
+            read -rsp "OpenAI API key: " api_key
+            echo ""
+            read -rp "Model [gpt-4o-mini]: " model
+            model="${model:-gpt-4o-mini}"
+            ;;
+        2)
+            provider="claude"
+            read -rsp "Claude API key: " api_key
+            echo ""
+            read -rp "Model [claude-sonnet-4-20250514]: " model
+            model="${model:-claude-sonnet-4-20250514}"
+            ;;
+        3)
+            provider="gemini"
+            read -rsp "Gemini API key: " api_key
+            echo ""
+            read -rp "Model [gemini-2.0-flash]: " model
+            model="${model:-gemini-2.0-flash}"
+            ;;
+        4)
+            provider="ollama"
+            read -rp "Ollama host [http://localhost:11434]: " ollama_host
+            ollama_host="${ollama_host:-http://localhost:11434}"
+            read -rp "Model [llama3.2]: " model
+            model="${model:-llama3.2}"
+            ;;
+        *)
+            echo "Invalid choice" >&2
+            exit 1
+            ;;
+    esac
+
+    mkdir -p "$config_dir"
+
+    : > "$config_file"
+    chmod 600 "$config_file"
+
+    echo "AI_PROVIDER=$provider" >> "$config_file"
+    case "$provider" in
+        openai)
+            echo "OPENAI_API_KEY=$api_key" >> "$config_file"
+            echo "OPENAI_MODEL=$model" >> "$config_file"
+            ;;
+        claude)
+            echo "CLAUDE_API_KEY=$api_key" >> "$config_file"
+            echo "CLAUDE_MODEL=$model" >> "$config_file"
+            ;;
+        gemini)
+            echo "GEMINI_API_KEY=$api_key" >> "$config_file"
+            echo "GEMINI_MODEL=$model" >> "$config_file"
+            ;;
+        ollama)
+            echo "OLLAMA_HOST=$ollama_host" >> "$config_file"
+            echo "OLLAMA_MODEL=$model" >> "$config_file"
+            ;;
+    esac
+
+    echo ""
+    echo "Config saved to $config_file"
+}
+
 # Parse flags using while/shift to support -d PATH
 parse_args() {
     SHOW_ALL=false
     SHOW_ALL_TIME=false
     LITERAL_YESTERDAY=false
+    USE_AI=false
     SCAN_DIR=""
     PASS_ARGS=()
 
@@ -39,6 +124,13 @@ parse_args() {
         case "$1" in
             --help|-h|-H)
                 show_help
+                ;;
+            --setup)
+                run_setup
+                exit 0
+                ;;
+            --ai|-i|-I)
+                USE_AI=true
                 ;;
             --all-authors|-a|-A)
                 SHOW_ALL=true
@@ -60,11 +152,12 @@ parse_args() {
                 SCAN_DIR="$2"
                 shift
                 ;;
-            -[aAtTlLdD][aAtTlLdD]|-[aAtTlLdD][aAtTlLdD][aAtTlLdD]|-[aAtTlLdD][aAtTlLdD][aAtTlLdD][aAtTlLdD])
-                # Combined short flags like -at, -atd, etc.
+            -[aAtTlLdDiI][aAtTlLdDiI]|-[aAtTlLdDiI][aAtTlLdDiI][aAtTlLdDiI]|-[aAtTlLdDiI][aAtTlLdDiI][aAtTlLdDiI][aAtTlLdDiI]|-[aAtTlLdDiI][aAtTlLdDiI][aAtTlLdDiI][aAtTlLdDiI][aAtTlLdDiI])
+                # Combined short flags like -at, -atd, -ai, etc.
                 [[ "$1" =~ [aA] ]] && SHOW_ALL=true
                 [[ "$1" =~ [tT] ]] && SHOW_ALL_TIME=true
                 [[ "$1" =~ [lL] ]] && LITERAL_YESTERDAY=true
+                [[ "$1" =~ [iI] ]] && USE_AI=true
                 if [[ "$1" =~ [dD] ]]; then
                     if [[ -z "${2:-}" ]]; then
                         echo "Error: -d requires a directory path" >&2
@@ -207,6 +300,273 @@ run_multi_repo() {
         '
 }
 
+# AI Summarization functions
+
+AI_SYSTEM_PROMPT="Summarize these git commits as a 1-3 line standup update. Plain non-technical language — describe what was added, changed, or removed in terms anyone can understand. No bullet points, no markdown, no commit hashes, no file paths, no branch names. Past tense. Be brief."
+
+load_config() {
+    local config_file="$HOME/.config/yesterday/config"
+    if [[ ! -f "$config_file" ]]; then
+        echo "No AI config found. Run 'yesterday --setup' to configure." >&2
+        return 1
+    fi
+    # shellcheck source=/dev/null
+    source "$config_file"
+}
+
+detect_json_tool() {
+    if command -v jq &>/dev/null; then
+        JSON_TOOL="jq"
+    elif command -v python3 &>/dev/null; then
+        JSON_TOOL="python3"
+    else
+        echo "jq or python3 is required for AI features. Install one and try again." >&2
+        return 1
+    fi
+}
+
+call_openai() {
+    local prompt="$1"
+    local model="${OPENAI_MODEL:-gpt-4o-mini}"
+    local body
+
+    if [[ "$JSON_TOOL" == "jq" ]]; then
+        body=$(jq -n --arg model "$model" --arg system "$AI_SYSTEM_PROMPT" --arg user "$prompt" \
+            '{model: $model, messages: [{role: "system", content: $system}, {role: "user", content: $user}]}')
+    else
+        body=$(printf '%s' "$prompt" | python3 -c "
+import json, sys
+print(json.dumps({'model': sys.argv[1], 'messages': [
+    {'role': 'system', 'content': sys.argv[2]},
+    {'role': 'user', 'content': sys.stdin.read()}
+]}))" "$model" "$AI_SYSTEM_PROMPT")
+    fi
+
+    curl -s -w "\n%{http_code}" "https://api.openai.com/v1/chat/completions" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $OPENAI_API_KEY" \
+        -d "$body"
+}
+
+call_claude() {
+    local prompt="$1"
+    local model="${CLAUDE_MODEL:-claude-sonnet-4-20250514}"
+    local body
+
+    if [[ "$JSON_TOOL" == "jq" ]]; then
+        body=$(jq -n --arg model "$model" --arg system "$AI_SYSTEM_PROMPT" --arg user "$prompt" \
+            '{model: $model, max_tokens: 1024, system: $system, messages: [{role: "user", content: $user}]}')
+    else
+        body=$(printf '%s' "$prompt" | python3 -c "
+import json, sys
+print(json.dumps({'model': sys.argv[1], 'max_tokens': 1024, 'system': sys.argv[2],
+    'messages': [{'role': 'user', 'content': sys.stdin.read()}]
+}))" "$model" "$AI_SYSTEM_PROMPT")
+    fi
+
+    curl -s -w "\n%{http_code}" "https://api.anthropic.com/v1/messages" \
+        -H "Content-Type: application/json" \
+        -H "x-api-key: $CLAUDE_API_KEY" \
+        -H "anthropic-version: 2023-06-01" \
+        -d "$body"
+}
+
+call_gemini() {
+    local prompt="$1"
+    local model="${GEMINI_MODEL:-gemini-2.0-flash}"
+    local body
+
+    if [[ "$JSON_TOOL" == "jq" ]]; then
+        body=$(jq -n --arg system "$AI_SYSTEM_PROMPT" --arg user "$prompt" \
+            '{systemInstruction: {parts: [{text: $system}]}, contents: [{parts: [{text: $user}]}]}')
+    else
+        body=$(printf '%s' "$prompt" | python3 -c "
+import json, sys
+print(json.dumps({'systemInstruction': {'parts': [{'text': sys.argv[1]}]},
+    'contents': [{'parts': [{'text': sys.stdin.read()}]}]
+}))" "$AI_SYSTEM_PROMPT")
+    fi
+
+    curl -s -w "\n%{http_code}" \
+        "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$body"
+}
+
+call_ollama() {
+    local prompt="$1"
+    local host="${OLLAMA_HOST:-http://localhost:11434}"
+    local model="${OLLAMA_MODEL:-llama3.2}"
+    local body
+
+    if [[ "$JSON_TOOL" == "jq" ]]; then
+        body=$(jq -n --arg model "$model" --arg system "$AI_SYSTEM_PROMPT" --arg user "$prompt" \
+            '{model: $model, stream: false, messages: [{role: "system", content: $system}, {role: "user", content: $user}]}')
+    else
+        body=$(printf '%s' "$prompt" | python3 -c "
+import json, sys
+print(json.dumps({'model': sys.argv[1], 'stream': False, 'messages': [
+    {'role': 'system', 'content': sys.argv[2]},
+    {'role': 'user', 'content': sys.stdin.read()}
+]}))" "$model" "$AI_SYSTEM_PROMPT")
+    fi
+
+    curl -s -w "\n%{http_code}" "${host}/api/chat" \
+        -H "Content-Type: application/json" \
+        -d "$body"
+}
+
+parse_ai_response() {
+    local body="$1"
+    local provider="$2"
+
+    if [[ "$JSON_TOOL" == "jq" ]]; then
+        case "$provider" in
+            openai)  jq -r '.choices[0].message.content // empty' <<< "$body" ;;
+            claude)  jq -r '.content[0].text // empty' <<< "$body" ;;
+            gemini)  jq -r '.candidates[0].content.parts[0].text // empty' <<< "$body" ;;
+            ollama)  jq -r '.message.content // empty' <<< "$body" ;;
+        esac
+    else
+        case "$provider" in
+            openai)  python3 -c "import json,sys; r=json.load(sys.stdin); print(r['choices'][0]['message']['content'])" <<< "$body" ;;
+            claude)  python3 -c "import json,sys; r=json.load(sys.stdin); print(r['content'][0]['text'])" <<< "$body" ;;
+            gemini)  python3 -c "import json,sys; r=json.load(sys.stdin); print(r['candidates'][0]['content']['parts'][0]['text'])" <<< "$body" ;;
+            ollama)  python3 -c "import json,sys; r=json.load(sys.stdin); print(r['message']['content'])" <<< "$body" ;;
+        esac
+    fi 2>/dev/null
+}
+
+ai_summarize() {
+    load_config || return 1
+    detect_json_tool || return 1
+
+    if ! command -v curl &>/dev/null; then
+        echo "curl is required for AI features." >&2
+        return 1
+    fi
+
+    local provider="${AI_PROVIDER:-}"
+    case "$provider" in
+        openai)  [[ -z "${OPENAI_API_KEY:-}" ]] && { echo "No API key set for OpenAI. Run 'yesterday --setup'." >&2; return 1; } ;;
+        claude)  [[ -z "${CLAUDE_API_KEY:-}" ]] && { echo "No API key set for Claude. Run 'yesterday --setup'." >&2; return 1; } ;;
+        gemini)  [[ -z "${GEMINI_API_KEY:-}" ]] && { echo "No API key set for Gemini. Run 'yesterday --setup'." >&2; return 1; } ;;
+        ollama)  ;;
+        *)       echo "Unknown AI provider: $provider. Run 'yesterday --setup'." >&2; return 1 ;;
+    esac
+
+    # Gather commit data with stats for richer AI context
+    local commit_data=""
+    if [[ -n "$SCAN_DIR" ]]; then
+        local dir="$SCAN_DIR"
+        if [[ -d "$dir/.git" ]]; then
+            commit_data=$(git -C "$dir" log "${LOG_ARGS[@]}" --format="%h %an: %s" --stat 2>/dev/null)
+        else
+            for repo_dir in "$dir"/*/; do
+                if [[ -d "$repo_dir/.git" ]]; then
+                    local repo_name
+                    repo_name=$(basename "${repo_dir%/}")
+                    local data
+                    data=$(git -C "${repo_dir%/}" log "${LOG_ARGS[@]}" --format="%h %an: %s" --stat 2>/dev/null)
+                    if [[ -n "$data" ]]; then
+                        commit_data+="[$repo_name]"$'\n'"$data"$'\n\n'
+                    fi
+                fi
+            done
+        fi
+    else
+        commit_data=$(git log "${LOG_ARGS[@]}" --format="%h %an: %s" --stat 2>/dev/null)
+    fi
+
+    if [[ -z "$commit_data" ]]; then
+        return 0
+    fi
+
+    # Show lines added/removed summary
+    local shortstat=""
+    if [[ -n "$SCAN_DIR" ]]; then
+        local dir="$SCAN_DIR"
+        if [[ -d "$dir/.git" ]]; then
+            shortstat=$(git -C "$dir" log "${LOG_ARGS[@]}" --shortstat 2>/dev/null)
+        else
+            for repo_dir in "$dir"/*/; do
+                if [[ -d "$repo_dir/.git" ]]; then
+                    shortstat+=$(git -C "${repo_dir%/}" log "${LOG_ARGS[@]}" --shortstat 2>/dev/null)
+                fi
+            done
+        fi
+    else
+        shortstat=$(git log "${LOG_ARGS[@]}" --shortstat 2>/dev/null)
+    fi
+
+    local total_added=0 total_removed=0
+    while IFS= read -r line; do
+        if [[ "$line" =~ ([0-9]+)\ insertion ]]; then
+            total_added=$((total_added + BASH_REMATCH[1]))
+        fi
+        if [[ "$line" =~ ([0-9]+)\ deletion ]]; then
+            total_removed=$((total_removed + BASH_REMATCH[1]))
+        fi
+    done <<< "$shortstat"
+
+    echo ""
+    printf '\033[32m+%s\033[0m \033[31m-%s\033[0m lines\n' "$total_added" "$total_removed"
+
+    # Start spinner
+    local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local spin_pid
+    (
+        i=0
+        while true; do
+            printf '\r\033[0;33m%s Generating summary…\033[0m' "${spin_chars:i%${#spin_chars}:1}" >&2
+            i=$((i + 1))
+            sleep 0.1
+        done
+    ) &
+    spin_pid=$!
+
+    local response
+    case "$provider" in
+        openai)  response=$(call_openai "$commit_data") ;;
+        claude)  response=$(call_claude "$commit_data") ;;
+        gemini)  response=$(call_gemini "$commit_data") ;;
+        ollama)  response=$(call_ollama "$commit_data") ;;
+    esac
+
+    # Stop spinner and clear line
+    kill "$spin_pid" 2>/dev/null
+    wait "$spin_pid" 2>/dev/null
+    printf '\r\033[K' >&2
+
+    local status_code body
+    status_code=$(tail -1 <<< "$response")
+    body=$(sed '$d' <<< "$response")
+
+    if ! [[ "$status_code" =~ ^[0-9]+$ ]] || [[ "$status_code" -ne 200 ]]; then
+        echo "AI request failed ($status_code): ${body:0:200}" >&2
+        return 1
+    fi
+
+    local summary
+    summary=$(parse_ai_response "$body" "$provider")
+
+    if [[ -z "$summary" ]]; then
+        echo "Could not parse AI response: ${body:0:200}" >&2
+        return 1
+    fi
+
+    local model_name
+    case "$provider" in
+        openai)  model_name="${OPENAI_MODEL:-gpt-4o-mini}" ;;
+        claude)  model_name="${CLAUDE_MODEL:-claude-sonnet-4-20250514}" ;;
+        gemini)  model_name="${GEMINI_MODEL:-gemini-2.0-flash}" ;;
+        ollama)  model_name="${OLLAMA_MODEL:-llama3.2}" ;;
+    esac
+
+    printf '\033[1;34m── AI Summary (%s/%s) ──\033[0m\n' "$provider" "$model_name"
+    printf '\033[0;36m%s\033[0m\n' "$summary"
+}
+
 main() {
     set -eo pipefail
 
@@ -245,6 +605,11 @@ main() {
                     }
                 }
             '
+    fi
+
+    # AI summarization (after normal output)
+    if [[ "$USE_AI" == true ]]; then
+        ai_summarize || true
     fi
 }
 
