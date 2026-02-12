@@ -77,6 +77,24 @@ If the path is itself a git repo, it runs in single-repo mode on that repo.
 - **Consistent dates** — Uses commit date, not author date
 - **Multi-repo scanning** — Scan all repos in a directory with `-d`
 
+## Testing
+
+Tests use [BATS](https://github.com/bats-core/bats-core) (Bash Automated Testing System), included as git submodules.
+
+```bash
+# Clone with submodules
+git clone --recurse-submodules https://github.com/danjdewhurst/yesterday.git
+
+# Or init submodules in an existing clone
+git submodule update --init --recursive
+
+# Run all tests
+./test/libs/bats-core/bin/bats test/
+
+# Run a single test file
+./test/libs/bats-core/bin/bats test/flag_parsing.bats
+```
+
 ## Platform Support
 
 | Platform | Status |

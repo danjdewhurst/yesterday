@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -eo pipefail
 
 show_help() {
     cat << 'EOF'
@@ -29,57 +28,59 @@ EOF
 }
 
 # Parse flags using while/shift to support -d PATH
-SHOW_ALL=false
-SHOW_ALL_TIME=false
-LITERAL_YESTERDAY=false
-SCAN_DIR=""
-PASS_ARGS=()
+parse_args() {
+    SHOW_ALL=false
+    SHOW_ALL_TIME=false
+    LITERAL_YESTERDAY=false
+    SCAN_DIR=""
+    PASS_ARGS=()
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --help|-h|-H)
-            show_help
-            ;;
-        --all-authors|-a|-A)
-            SHOW_ALL=true
-            ;;
-        --all-time|-t|-T)
-            SHOW_ALL_TIME=true
-            ;;
-        --literal|-l|-L)
-            LITERAL_YESTERDAY=true
-            ;;
-        --directory=*)
-            SCAN_DIR="${1#--directory=}"
-            ;;
-        --directory|-d|-D)
-            if [[ -z "${2:-}" ]]; then
-                echo "Error: $1 requires a directory path" >&2
-                exit 1
-            fi
-            SCAN_DIR="$2"
-            shift
-            ;;
-        -[aAtTlLdD][aAtTlLdD]|-[aAtTlLdD][aAtTlLdD][aAtTlLdD]|-[aAtTlLdD][aAtTlLdD][aAtTlLdD][aAtTlLdD])
-            # Combined short flags like -at, -atd, etc.
-            [[ "$1" =~ [aA] ]] && SHOW_ALL=true
-            [[ "$1" =~ [tT] ]] && SHOW_ALL_TIME=true
-            [[ "$1" =~ [lL] ]] && LITERAL_YESTERDAY=true
-            if [[ "$1" =~ [dD] ]]; then
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h|-H)
+                show_help
+                ;;
+            --all-authors|-a|-A)
+                SHOW_ALL=true
+                ;;
+            --all-time|-t|-T)
+                SHOW_ALL_TIME=true
+                ;;
+            --literal|-l|-L)
+                LITERAL_YESTERDAY=true
+                ;;
+            --directory=*)
+                SCAN_DIR="${1#--directory=}"
+                ;;
+            --directory|-d|-D)
                 if [[ -z "${2:-}" ]]; then
-                    echo "Error: -d requires a directory path" >&2
+                    echo "Error: $1 requires a directory path" >&2
                     exit 1
                 fi
                 SCAN_DIR="$2"
                 shift
-            fi
-            ;;
-        *)
-            PASS_ARGS+=("$1")
-            ;;
-    esac
-    shift
-done
+                ;;
+            -[aAtTlLdD][aAtTlLdD]|-[aAtTlLdD][aAtTlLdD][aAtTlLdD]|-[aAtTlLdD][aAtTlLdD][aAtTlLdD][aAtTlLdD])
+                # Combined short flags like -at, -atd, etc.
+                [[ "$1" =~ [aA] ]] && SHOW_ALL=true
+                [[ "$1" =~ [tT] ]] && SHOW_ALL_TIME=true
+                [[ "$1" =~ [lL] ]] && LITERAL_YESTERDAY=true
+                if [[ "$1" =~ [dD] ]]; then
+                    if [[ -z "${2:-}" ]]; then
+                        echo "Error: -d requires a directory path" >&2
+                        exit 1
+                    fi
+                    SCAN_DIR="$2"
+                    shift
+                fi
+                ;;
+            *)
+                PASS_ARGS+=("$1")
+                ;;
+        esac
+        shift
+    done
+}
 
 # Build git log arguments into LOG_ARGS array
 build_log_args() {
@@ -206,37 +207,48 @@ run_multi_repo() {
         '
 }
 
-# Expand tilde in SCAN_DIR (shell doesn't expand ~ after = in --directory=~/path)
-[[ -n "$SCAN_DIR" ]] && SCAN_DIR="${SCAN_DIR/#\~/$HOME}"
+main() {
+    set -eo pipefail
 
-# Main dispatch
-if [[ -n "$SCAN_DIR" ]]; then
-    run_multi_repo "$SCAN_DIR"
-else
-    # Check if we're in a git repository
-    if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-        echo "Error: Not a git repository (use -d to scan a directory)" >&2
-        exit 1
-    fi
+    parse_args "$@"
 
-    # Get the current git user's name for default filtering
-    GIT_USER=$(git config user.name 2>/dev/null || echo "")
+    # Expand tilde in SCAN_DIR (shell doesn't expand ~ after = in --directory=~/path)
+    [[ -n "$SCAN_DIR" ]] && SCAN_DIR="${SCAN_DIR/#\~/$HOME}"
 
-    build_log_args "$GIT_USER"
+    # Main dispatch
+    if [[ -n "$SCAN_DIR" ]]; then
+        run_multi_repo "$SCAN_DIR"
+    else
+        # Check if we're in a git repository
+        if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+            echo "Error: Not a git repository (use -d to scan a directory)" >&2
+            exit 1
+        fi
 
-    # Format: short hash | datetime | author | subject
-    # De-duplicate based on the subject (commit message), dynamic author width
-    git log "${LOG_ARGS[@]}" | \
-        awk -F'|' '
-            !seen[$4]++ {
-                lines[++n] = $0
-                if (length($3) > max) max = length($3)
-            }
-            END {
-                for (i = 1; i <= n; i++) {
-                    split(lines[i], f, "|")
-                    printf "%s  %s  %-*s  %s\n", f[1], f[2], max, f[3], f[4]
+        # Get the current git user's name for default filtering
+        GIT_USER=$(git config user.name 2>/dev/null || echo "")
+
+        build_log_args "$GIT_USER"
+
+        # Format: short hash | datetime | author | subject
+        # De-duplicate based on the subject (commit message), dynamic author width
+        git log "${LOG_ARGS[@]}" | \
+            awk -F'|' '
+                !seen[$4]++ {
+                    lines[++n] = $0
+                    if (length($3) > max) max = length($3)
                 }
-            }
-        '
+                END {
+                    for (i = 1; i <= n; i++) {
+                        split(lines[i], f, "|")
+                        printf "%s  %s  %-*s  %s\n", f[1], f[2], max, f[3], f[4]
+                    }
+                }
+            '
+    fi
+}
+
+# Only run main when executed directly, not when sourced for testing
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
 fi
