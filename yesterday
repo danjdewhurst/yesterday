@@ -8,39 +8,35 @@ yesterday - List git commits from yesterday and today for standups
 Usage: yesterday [options] [-- git-log-options]
 
 Options:
-  -a, --all-authors    Show commits from all authors (default: current user)
-  -t, --all-time       Show all commits (default: since yesterday)
-  -l, --literal        Use literal yesterday (default: last Friday on Mondays)
-  -h, --help           Show this help message
+  -a, --all-authors      Show commits from all authors (default: current user)
+  -t, --all-time         Show all commits (default: since yesterday)
+  -l, --literal          Use literal yesterday (default: last Friday on Mondays)
+  -d, --directory DIR    Scan all git repos in DIR
+  -h, --help             Show this help message
 
 Examples:
-  yesterday                      Your commits from yesterday + today
-  yesterday -a                   All authors' commits
-  yesterday -t                   Your commits from all time
-  yesterday -at                  All commits from all authors
-  yesterday --since="1 week ago" Custom time range (passes to git log)
+  yesterday                        Your commits from yesterday + today
+  yesterday -a                     All authors' commits
+  yesterday -t                     Your commits from all time
+  yesterday -at                    All commits from all authors
+  yesterday -d ~/Projects          Scan all repos in a directory
+  yesterday -atd ~/Projects        Combined flags with directory scan
+  yesterday --since="1 week ago"   Custom time range (passes to git log)
 
 Output: hash  datetime  author  message
 EOF
     exit 0
 }
 
-# Check if we're in a git repository
-if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-    echo "Error: Not a git repository" >&2
-    exit 1
-fi
-
-# Get the current git user's name for default filtering
-GIT_USER=$(git config user.name 2>/dev/null || echo "")
-
-# Check for flags
+# Parse flags using while/shift to support -d PATH
 SHOW_ALL=false
 SHOW_ALL_TIME=false
 LITERAL_YESTERDAY=false
+SCAN_DIR=""
 PASS_ARGS=()
-for arg in "$@"; do
-    case "$arg" in
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --help|-h|-H)
             show_help
             ;;
@@ -53,53 +49,194 @@ for arg in "$@"; do
         --literal|-l|-L)
             LITERAL_YESTERDAY=true
             ;;
-        -[aAtTlL][aAtTlL]|-[aAtTlL][aAtTlL][aAtTlL])
-            # Combined short flags like -at, -al, -atl, etc.
-            [[ "$arg" =~ [aA] ]] && SHOW_ALL=true
-            [[ "$arg" =~ [tT] ]] && SHOW_ALL_TIME=true
-            [[ "$arg" =~ [lL] ]] && LITERAL_YESTERDAY=true
+        --directory=*)
+            SCAN_DIR="${1#--directory=}"
+            ;;
+        --directory|-d|-D)
+            if [[ -z "${2:-}" ]]; then
+                echo "Error: $1 requires a directory path" >&2
+                exit 1
+            fi
+            SCAN_DIR="$2"
+            shift
+            ;;
+        -[aAtTlLdD][aAtTlLdD]|-[aAtTlLdD][aAtTlLdD][aAtTlLdD]|-[aAtTlLdD][aAtTlLdD][aAtTlLdD][aAtTlLdD])
+            # Combined short flags like -at, -atd, etc.
+            [[ "$1" =~ [aA] ]] && SHOW_ALL=true
+            [[ "$1" =~ [tT] ]] && SHOW_ALL_TIME=true
+            [[ "$1" =~ [lL] ]] && LITERAL_YESTERDAY=true
+            if [[ "$1" =~ [dD] ]]; then
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: -d requires a directory path" >&2
+                    exit 1
+                fi
+                SCAN_DIR="$2"
+                shift
+            fi
             ;;
         *)
-            PASS_ARGS+=("$arg")
+            PASS_ARGS+=("$1")
             ;;
     esac
+    shift
 done
 
-# Build git log command (use commit date %cd to match --since filtering)
-GIT_CMD=(git log --all --format="%h|%cd|%an|%s" --date=format:"%Y-%m-%d %H:%M")
+# Build git log arguments into LOG_ARGS array
+build_log_args() {
+    local git_user="$1"
+    LOG_ARGS=(--all --format="%h|%cd|%an|%s" --date=format:"%Y-%m-%d %H:%M")
 
-# Add author filter (default to current user unless --all-authors/-a or custom --author)
-if [[ "$SHOW_ALL" == false ]] && [[ -n "$GIT_USER" ]] && [[ ! " $* " =~ "--author" ]]; then
-    GIT_CMD+=("--author=$GIT_USER")
-fi
-
-# Add time filter (default to since start of yesterday unless --all-time/-t or custom --since/--after)
-# On Mondays, default to "last friday" instead of "yesterday" (unless --literal/-l)
-if [[ "$SHOW_ALL_TIME" == false ]] && [[ ! " $* " =~ "--since" ]] && [[ ! " $* " =~ "--after" ]]; then
-    if [[ "$LITERAL_YESTERDAY" == true ]] || [[ $(date +%u) -ne 1 ]]; then
-        GIT_CMD+=("--since=yesterday")
-    else
-        GIT_CMD+=("--since=last friday")
+    # Add author filter (default to current user unless --all-authors/-a or custom --author)
+    if [[ "$SHOW_ALL" == false ]] && [[ -n "$git_user" ]]; then
+        local has_author=false
+        for arg in "${PASS_ARGS[@]}"; do
+            [[ "$arg" == --author* ]] && has_author=true
+        done
+        if [[ "$has_author" == false ]]; then
+            LOG_ARGS+=("--author=$git_user")
+        fi
     fi
-fi
 
-# Add any additional arguments
-if [[ ${#PASS_ARGS[@]} -gt 0 ]]; then
-    GIT_CMD+=("${PASS_ARGS[@]}")
-fi
+    # Add time filter (default to since start of yesterday unless --all-time/-t or custom --since/--after)
+    # On Mondays, default to "last friday" instead of "yesterday" (unless --literal/-l)
+    if [[ "$SHOW_ALL_TIME" == false ]]; then
+        local has_since=false
+        for arg in "${PASS_ARGS[@]}"; do
+            [[ "$arg" == --since* || "$arg" == --after* ]] && has_since=true
+        done
+        if [[ "$has_since" == false ]]; then
+            if [[ "$LITERAL_YESTERDAY" == true ]] || [[ $(date +%u) -ne 1 ]]; then
+                LOG_ARGS+=("--since=yesterday")
+            else
+                LOG_ARGS+=("--since=last friday")
+            fi
+        fi
+    fi
 
-# Format: short hash | datetime | author | subject
-# De-duplicate based on the subject (commit message), dynamic author width
-"${GIT_CMD[@]}" | \
-    awk -F'|' '
-        !seen[$4]++ {
-            lines[++n] = $0
-            if (length($3) > max) max = length($3)
-        }
-        END {
-            for (i = 1; i <= n; i++) {
-                split(lines[i], f, "|")
-                printf "%s  %s  %-*s  %s\n", f[1], f[2], max, f[3], f[4]
+    # Add any additional arguments
+    if [[ ${#PASS_ARGS[@]} -gt 0 ]]; then
+        LOG_ARGS+=("${PASS_ARGS[@]}")
+    fi
+}
+
+# Discover git repos as immediate children of a directory
+discover_repos() {
+    local dir="$1"
+    REPOS=()
+    for child in "$dir"/*/; do
+        if [[ -d "$child/.git" ]]; then
+            REPOS+=("${child%/}")
+        fi
+    done
+}
+
+# Run multi-repo scan
+run_multi_repo() {
+    local dir="$1"
+
+    if [[ ! -d "$dir" ]]; then
+        echo "Error: Directory not found: $dir" >&2
+        exit 1
+    fi
+
+    # If the path itself is a git repo, treat as single repo
+    if [[ -d "$dir/.git" ]]; then
+        local git_user
+        git_user=$(git -C "$dir" config user.name 2>/dev/null || git config --global user.name 2>/dev/null || echo "")
+        build_log_args "$git_user"
+        git -C "$dir" log "${LOG_ARGS[@]}" 2>/dev/null | \
+            awk -F'|' '
+                !seen[$4]++ {
+                    lines[++n] = $0
+                    if (length($3) > max) max = length($3)
+                }
+                END {
+                    for (i = 1; i <= n; i++) {
+                        split(lines[i], f, "|")
+                        printf "%s  %s  %-*s  %s\n", f[1], f[2], max, f[3], f[4]
+                    }
+                }
+            '
+        return
+    fi
+
+    discover_repos "$dir"
+
+    if [[ ${#REPOS[@]} -eq 0 ]]; then
+        echo "Error: No git repositories found in $dir" >&2
+        exit 1
+    fi
+
+    # Use global git user for author filtering across repos
+    local git_user
+    git_user=$(git config --global user.name 2>/dev/null || echo "")
+    build_log_args "$git_user"
+
+    local all_output=""
+    for repo in "${REPOS[@]}"; do
+        local repo_name
+        repo_name=$(basename "$repo")
+        local output
+        output=$(git -C "$repo" log "${LOG_ARGS[@]}" 2>/dev/null | \
+            sed "s/^/$repo_name|/") || true
+        [[ -n "$output" ]] && all_output+="$output"$'\n'
+    done
+
+    if [[ -z "$all_output" ]]; then
+        echo "No commits found." >&2
+        exit 0
+    fi
+
+    # Format: repo|hash|date|author|subject
+    # Dedup by repo+subject, align columns
+    echo -n "$all_output" | \
+        awk -F'|' '
+            !seen[$1 "|" $5]++ {
+                lines[++n] = $0
+                repo = "[" $1 "]"
+                if (length(repo) > maxrepo) maxrepo = length(repo)
+                if (length($4) > maxauthor) maxauthor = length($4)
             }
-        }
-    '
+            END {
+                for (i = 1; i <= n; i++) {
+                    split(lines[i], f, "|")
+                    printf "%-*s  %s  %s  %-*s  %s\n", maxrepo, "[" f[1] "]", f[2], f[3], maxauthor, f[4], f[5]
+                }
+            }
+        '
+}
+
+# Expand tilde in SCAN_DIR (shell doesn't expand ~ after = in --directory=~/path)
+[[ -n "$SCAN_DIR" ]] && SCAN_DIR="${SCAN_DIR/#\~/$HOME}"
+
+# Main dispatch
+if [[ -n "$SCAN_DIR" ]]; then
+    run_multi_repo "$SCAN_DIR"
+else
+    # Check if we're in a git repository
+    if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+        echo "Error: Not a git repository (use -d to scan a directory)" >&2
+        exit 1
+    fi
+
+    # Get the current git user's name for default filtering
+    GIT_USER=$(git config user.name 2>/dev/null || echo "")
+
+    build_log_args "$GIT_USER"
+
+    # Format: short hash | datetime | author | subject
+    # De-duplicate based on the subject (commit message), dynamic author width
+    git log "${LOG_ARGS[@]}" | \
+        awk -F'|' '
+            !seen[$4]++ {
+                lines[++n] = $0
+                if (length($3) > max) max = length($3)
+            }
+            END {
+                for (i = 1; i <= n; i++) {
+                    split(lines[i], f, "|")
+                    printf "%s  %s  %-*s  %s\n", f[1], f[2], max, f[3], f[4]
+                }
+            }
+        '
+fi

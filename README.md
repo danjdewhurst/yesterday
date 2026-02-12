@@ -37,7 +37,9 @@ yesterday                       # Your commits from yesterday + today
 yesterday -a                    # All authors
 yesterday -t                    # All time
 yesterday -l                    # Literal yesterday (disable Monday → Friday)
+yesterday -d ~/Projects         # Scan all repos in a directory
 yesterday -at                   # All authors, all time (combined flags)
+yesterday -atd ~/Projects       # Combined flags with directory scan
 yesterday --since="1 week ago"  # Custom time range
 yesterday --author="john"       # Custom author filter
 ```
@@ -47,11 +49,24 @@ yesterday --author="john"       # Custom author filter
 | `-a`, `--all-authors` | Show commits from all authors |
 | `-t`, `--all-time` | Remove the date filter |
 | `-l`, `--literal` | Use literal yesterday (disable workday logic) |
+| `-d`, `--directory DIR` | Scan all git repos in DIR |
 | `-h`, `--help` | Show help message |
 
-Flags are case-insensitive and can be combined (e.g., `-at`, `-al`, `-atl`).
+Flags are case-insensitive and can be combined (e.g., `-at`, `-atd ~/Projects`).
 
 Any additional arguments are passed directly to `git log`.
+
+### Multi-repo scanning
+
+Use `-d` to scan all git repos in a directory at once — perfect for standup prep when your work spans multiple repos:
+
+```
+$ yesterday -d ~/Projects
+[yesterday]  f0388245  2025-01-14 16:45  Daniel Dewhurst  docs: update API reference
+[my-api]     dab654e5  2025-01-14 15:26  Daniel Dewhurst  fix: resolve auth timeout
+```
+
+If the path is itself a git repo, it runs in single-repo mode on that repo.
 
 ## Features
 
@@ -60,6 +75,7 @@ Any additional arguments are passed directly to `git log`.
 - **De-duplication** — Same commit on multiple branches? Shows once.
 - **All branches** — Searches across your entire repo
 - **Consistent dates** — Uses commit date, not author date
+- **Multi-repo scanning** — Scan all repos in a directory with `-d`
 
 ## Platform Support
 
